@@ -27,14 +27,71 @@ void ProcessWaveforms(TString inFile, TString outFile)
     
     TTree *trout = new TTree("waveforms","waveforms");
     
+    std::vector<long> vTimestamp, vChannel, vSamples;
+    
+    trout->Branch("channel",&vChannel);
+    trout->Branch("timestamp",&vTimestamp);
+    trout->Branch("samples",&vSamples);
+    
     int channel = -1;
+    
+    int counter = 0;//only here to I can try reading a few events at a time
+    
+    TGraph *g = new TGraph();//for checking the shape
     
     if(input.is_open())
     {
 //         while()//check for the end of the files? how many samples?
+        std::vector<string> entry;
+        
+        std::string line, word;
+        
+        while(getline(input, line) && counter<1)
+        {
+            std::cout << "New Entry" << std::endl;
             
+            vTimestamp.clear();
+            vChannel.clear();
+            vSamples.clear();            
             
-    }
+            stringstream str(line);
+            
+            while(getline(str, word, ';'))
+            {
+                entry.push_back(word);
+                
+                std::cout << "word = " << word << std::endl;
+            }
+            
+            vTimestamp.push_back(stol(entry.at(0)));
+            vChannel.push_back(stol(entry.at(1)));
+//             vSamples.push_back(entry.at(2));
+                
+            bool NegativeSignal = false;
+            if(stol(entry.at(4))<0)NegativeSignal = true;
+            
+            if(NegativeSignal)vSamples.push_back(-1*stol(entry.at(4)));
+            else vSamples.push_back(stol(entry.at(4)));
+            
+            for(int i=1;i<stoi(entry.at(2));i++)
+            {
+                vSamples.push_back(stol(entry.at(i+4)));
+            }
+            
+            for(unsigned int i=0;i<vSamples.size()-2;i++)
+            {
+                std::cout << vSamples.at(i) << std::endl;
+                g->SetPoint(g->GetN(),i,vSamples.at(i));
+            }
+            
+            counter++;
+            trout->Fill();
+        }
+    }//everything up to this point is just reading in the waveforms but now we need to look at making proper energy values from them etc *le sigh*
+    
+    
+    
+    g->Draw("AP");
     
     trout->Write();
     fout->Close();
