@@ -124,40 +124,48 @@ void ProcessWaveforms(TString inFile, TString outFile)
 
 void ProcessSpectra(TString inFile, TString outFile)
 {
+    //just to tell the user what the code is doing in case they chose the wrong option
     std::cout << "Processing listmode data" << std::endl;
     
+    //open the input file
     ifstream input;
     input.open(inFile.Data());
     
+    //open the output file
     TFile *fout = new TFile(outFile.Data(),"RECREATE");
-    
+    //make a TTree to put the output data into
     TTree *trout = new TTree("listmode","listmode");
-    
+    //data structures
     std::vector<long> vChannel, vTimestamp, vADCValue;
-    
+    //link them to the branches of the TTree
     trout->Branch("channel",&vChannel);
     trout->Branch("timestamp",&vTimestamp);
     trout->Branch("adc",&vADCValue);
     
     if(input.is_open())
     {
+        //clear out the crap
         vChannel.clear();
         vTimestamp.clear();
         vADCValue.clear();
         
+        //some data structures to put the output information into
         std::vector<string> entry;
-        
         std::string line, word;
         
+    //read in the lines
         while(getline(input, line))
         {
+            //again, clear out the crap
             entry.clear();
             vChannel.clear();
             vTimestamp.clear();
             vADCValue.clear();
             
+            //get the line
             stringstream str(line);
-                                 
+                          
+            //break the line up into words
             while(getline(str, word, ';'))
             {
                 entry.push_back(word);
@@ -167,49 +175,64 @@ void ProcessSpectra(TString inFile, TString outFile)
             
 //             std::cout << "entry.size() = " << entry.size() << std::endl;
             
+            //channel number is the first word
             vChannel.push_back(stol(entry[0]));
 //             std::cout << "vChannel.size() = " << vChannel.size() << std::endl;
             
+            //timestamp is the second word
             vTimestamp.push_back(stol(entry[1]));
 //             std::cout << "vTimestamp.size() = " << vTimestamp.size() << std::endl;
             
+            //ADC value is the third word
             vADCValue.push_back(stol(entry[2]));
 //             std::cout << "vADCValue.size() = " << vADCValue.size() << std::endl;
             
-            
+            //fill the TTree with the information
             trout->Fill();
         }
 //                 std::cout << channel << "\t" << timestamp << "\t" << adc << std::endl;
     }
-    else
+    else //warning message for missing input file
         std::cout << "Input file " << inFile.Data() << " doesn't seem to exist!" << std::endl;
     
+    //write the raw data dump out
     trout->Write();
     
+    //now to construct the tree which can link events within a certain time
     TTree *trent = new TTree("events","events");
+    //EventLength is an integer giving the total number of hits within the event
     int EventLength;
+    //EventTimes, ADCs and Channels give the timestamps, ADC values and channels of each hit in the event
     std::vector<long> EventTimes, EventADCs, EventChannels;
     
+    //link to TBranches
     trent->Branch("EventLength",&EventLength);
     trent->Branch("EventTimes",&EventTimes);
     trent->Branch("EventADCs",&EventADCs);
     trent->Branch("EventChannels",&EventChannels);
     
+    //These are the data structures and branches to read from the TTree written to the output TFile - we reconstruct events from there **NOT** from the original data file for reasons
     std::vector<long> *ReadChannel = 0, *ReadTime = 0, *ReadADC = 0;
     TBranch *bReadChannel, *bReadTime, *bReadADC;
     
+    //get the raw output TTree
     TTree *ReadTrout = (TTree*)fout->Get("listmode");
     
+    //get the branches to it
     ReadTrout->SetBranchAddress("channel",&ReadChannel,&bReadChannel);
     ReadTrout->SetBranchAddress("timestamp",&ReadTime,&bReadTime);
     ReadTrout->SetBranchAddress("adc",&ReadADC,&bReadADC);
     
+    //get the number of entires
     long nentries = ReadTrout->GetEntries();
+    //now loop over those entries
     for(long i=0; i<nentries; i++)
     {
 //         ReadTrout->Show(i);
+        //get the entry, the line above prints out each entry's contents if uncommented - useful for debugging but prints out miles of crap to the screen
         ReadTrout->GetEntry(i);
         
+        //clear out the old pipes
         EventLength = 0;
         EventTimes.clear();
         EventADCs.clear();
@@ -219,47 +242,50 @@ void ProcessSpectra(TString inFile, TString outFile)
 //         std::cout << "VectorSize = " << VectorSize << std::endl;
         
 //         std::cout << i << "\t" << ReadChannel->at(0) << std::endl;//just for testing
+        //yeah, this shouldn't be able to happen and I don't know what to do about it
         if(ReadChannel->size()>1)std::cout << "For event " << i << " there are multiple hits in one channel and I did not account for that!" << std::endl;
         
+        //get the time of the first event read in the TTree
         long TimeFirstEvent = ReadTime->at(0);
-        
+        //assume, for now, that the event is one entry long and set the time and the last event number accordingly
         long TimeLastEvent = TimeFirstEvent;
-        
         long LastEventNumber = i;
         
+        //add the information from this first hit to the TTree
         EventLength++;
         EventChannels.push_back(ReadChannel->at(0));
         EventTimes.push_back(ReadTime->at(0));
         EventADCs.push_back(ReadADC->at(0));
         
+        //now loop, ONLY GOING FORWARDS, on the original TTree within both the event window (set at the top) and the time window (also set at the top) to look for possible matching events
         for(long j=i+1; j<i+EventWindow; j++)//only look a few results ahead
         {
+            //get the next entry
             ReadTrout->GetEntry(j);
             
 //             std::cout << ReadTime->at(0) - TimeFirstEvent << std::endl;
-            
+            //next if statement says "is it within the required time??" - if so, store it as past of the same event
             if(abs(ReadTime->at(0) - TimeFirstEvent)<TimeWindow)
             {
                 EventLength++;
                 EventChannels.push_back(ReadChannel->at(0));
                 EventTimes.push_back(ReadTime->at(0));
                 EventADCs.push_back(ReadADC->at(0));
-                
+                //make the last event number the last event which matched within the event window and the time window
                 LastEventNumber = j;
             }
         }
-        
-        i = LastEventNumber;
+        //now skip ahead to the last event number+1 - i.e. to the end of the block that was read in as the prior event
+        i = LastEventNumber+1;
         
 //         std::cout << "la la la" << std::endl;//this is supposed to be useful??
-        
+        //fill the TTree
         trent->Fill();
         
     }
-    
+    //write stuff out
     trent->Write();
     fout->Close();
     
-    input.close();
-    
+    input.close();    
 }
